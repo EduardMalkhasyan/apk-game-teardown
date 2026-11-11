@@ -46,6 +46,30 @@ class UnpackTests(unittest.TestCase):
         _, output = self.run_unpack(archive_bytes({'com.game.apk': base, 'UnityDataAssetPack.apk': pack}))
         self.assertEqual((output / 'unzipped/AndroidManifest.xml').read_bytes(), b'base')
 
+    def test_obb_copy_that_differs_is_kept_next_to_the_apk_copy(self):
+        # Unity split builds: the APK and the OBB both hold assets/bin/Data/data.unity3d, with different scenes.
+        base = archive_bytes({'AndroidManifest.xml': b'm', 'classes.dex': b'd',
+                              'assets/bin/Data/data.unity3d': b'apk scenes', 'assets/same.json': b'{}'})
+        obb = archive_bytes({'assets/bin/Data/data.unity3d': b'obb scenes, much bigger',
+                             'assets/same.json': b'{}', 'assets/bin/Data/resources.resource': b'r'})
+        report, output = self.run_unpack(archive_bytes({
+            'com.game.apk': base, 'Android/obb/com.game/main.225.com.game.obb': obb}))
+        data = output / 'unzipped/assets/bin/Data'
+        self.assertEqual((data / 'data.unity3d').read_bytes(), b'apk scenes')
+        self.assertEqual((data / 'data.main.unity3d').read_bytes(), b'obb scenes, much bigger')
+        self.assertTrue((data / 'resources.resource').exists())
+        self.assertEqual(report['renamed'], [{'entry': 'assets/bin/Data/data.unity3d', 'split': 'main',
+                                              'kept_as': 'assets/bin/Data/data.main.unity3d'}])
+        self.assertEqual(report['collisions'], 1)  # the identical same.json
+        self.assertIn('data.main.unity3d', report['warnings'][0])
+
+    def test_differing_files_outside_assets_still_keep_the_first_copy(self):
+        base = archive_bytes({'AndroidManifest.xml': b'base', 'classes.dex': b'd', 'assets/a.json': b'{}'})
+        split = archive_bytes({'AndroidManifest.xml': b'split', 'resources.arsc': b'r'})
+        report, output = self.run_unpack(archive_bytes({'com.game.apk': base, 'config.xxhdpi.apk': split}))
+        self.assertEqual(report['renamed'], [])
+        self.assertFalse(list((output / 'unzipped').glob('AndroidManifest.*.xml')))
+
     def test_entry_cannot_escape_target(self):
         report, output = self.run_unpack(archive_bytes({'../../evil.txt': b'x', 'AndroidManifest.xml': b'm', 'assets/a': b'y'}), 'a.apk')
         self.assertFalse((output.parent / 'evil.txt').exists())

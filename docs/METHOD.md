@@ -15,16 +15,12 @@ This repository is the toolbox and the method, like Photoshop without photos. It
 - Most native tools work best on `arm64-v8a`. If only `armeabi-v7a` is present, expect fewer recovered method bodies.
 
 ```sh
-cd ~/Desktop/apk-work/<run-id>
 shasum -a 256 package.xapk
 unzip -l package.xapk | tail -1             # total unpacked size: stop if it is far bigger than expected
-mkdir splits unzipped
-unzip -q package.xapk -d splits              # an XAPK, APKS or APKM is a zip of APKs (and maybe an OBB)
-find splits -name '*.apk' -exec unzip -q -n {} -d unzipped \;
-find splits -name '*.obb' -exec unzip -q -n {} -d unzipped \;
+python3 toolkit/unpack_package.py package.xapk ~/Desktop/apk-work/<run-id>
 ```
 
-For a single APK, run `unzip -q package.apk -d unzipped`. Check that `unzipped/assets/` exists before step 3.
+The unpacker writes `splits/` (the bundle's APKs and OBB) and `unzipped/` (all of them merged, base APK first). It works for a single APK too. Read its `warnings` and `renamed` list: in Unity split builds the APK and the OBB both hold `assets/bin/Data/data.unity3d` with different scenes, so the OBB copy is kept as `data.main.unity3d` next to the APK one. Do not merge splits by hand with `unzip -n`: it keeps the first copy and silently drops the OBB's game data. Check that `unzipped/assets/` exists before step 3.
 
 ## 2. Find the engine
 

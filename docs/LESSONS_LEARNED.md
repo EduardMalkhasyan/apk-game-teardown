@@ -14,6 +14,7 @@ Inspect container, splits, runtime version, architecture and feature flags befor
 - Some games ship only an ARM32 or only an ARM64 native split. Note which one you have before choosing tools.
 - Check the package name and version against the store listing first. A mirror's search once returned a 2021 build under another publisher's package name, with a dead mediator, for a game whose live build was five years newer.
 - Treat packages as hostile archives: refuse entries that would land outside the target folder, cap the bytes actually written (a few GB), and stop on a time budget.
+- Splits can hold different files under the same path. In a Unity split-binary build the APK's `assets/bin/Data/data.unity3d` (18 MB: boot scene and global managers) and the OBB's (575 MB: every other scene and `resources.assets`) share a name. A "first file wins" merge dropped the OBB copy and the export read 7,851 objects instead of 370,664, with no error. Keep differing copies side by side and load them all; count the objects per bundle before trusting an export.
 - Watch memory on Unity exports. UnityPy caches a decoded atlas on each file that asks for it, so a game split into hundreds of small files that share atlases can hold one 2048x2048 copy per file, over 10 GB. Clear the cache when the export moves to the next file. On macOS check "peak memory footprint" in `/usr/bin/time -l`: compressed memory hides this from the resident size.
 
 ## Asset lessons
