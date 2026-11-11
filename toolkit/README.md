@@ -34,7 +34,7 @@ python3 toolkit/unpack_package.py package.xapk ~/Desktop/apk-work/<run-id>/<game
 python3 toolkit/scan_monetization.py ~/Desktop/apk-work/<run-id>/<game>/unzipped ~/Desktop/apk-work/<run-id>/<game>/evidence/scan
 ```
 
-Standard library only, and neither runs anything from the package. `unpack_package.py` refuses unsafe paths and symlinks, caps bytes and stops on a time budget. `scan_monetization.py` reads the binary manifest, DEX and IL2CPP metadata (versions up to 39). Its output is leads, not proof. See ../docs/MONETIZATION.md.
+Standard library only, and neither runs anything from the package. `unpack_package.py` refuses unsafe paths and symlinks, caps bytes and stops on a time budget; when splits hold different files under one path (the APK and OBB `data.unity3d` of Unity split builds), it keeps both. `scan_monetization.py` reads the binary manifest, DEX and IL2CPP metadata (versions up to 39). Its output is leads, not proof. See ../docs/MONETIZATION.md.
 
 ## Unity Mono / IL2CPP export
 

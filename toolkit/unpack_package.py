@@ -1,18 +1,23 @@
 """Unpack an APK/XAPK/APKS/APKM into a work folder, treating it as a hostile archive.
 
-Writes splits/ (the bundle's own entries) and unzipped/ (every split merged, first
-file wins) under the output folder. Refuses entries that would land outside the
-target, skips symlinks, caps the bytes written and stops on a time budget. It never
-runs anything from the package. Standard library only.
+Writes splits/ (the bundle's own entries) and unzipped/ (every split merged) under the
+output folder. The base APK goes first and its files win. A later file under assets/
+whose content differs from the one already merged is kept next to it, with the split's
+name in the file name: Unity split builds put a different data.unity3d in the APK and
+in the OBB, and both are needed. Identical duplicates are skipped. Refuses entries that
+would land outside the target, skips symlinks, caps the bytes written and stops on a
+time budget. It never runs anything from the package. Standard library only.
 """
 import argparse
 import json
 from pathlib import Path, PurePosixPath
+import re
 import shutil
 import stat
 import sys
 import time
 import zipfile
+import zlib
 
 REPOSITORY = Path(__file__).resolve().parent.parent
 CHUNK = 1024 * 1024
@@ -45,7 +50,40 @@ def safe_target(root, name):
     return target
 
 
-def extract(archive, root, budget, report, overwrite=False):
+def same_content(path, entry):
+    """True when the file on disk holds exactly the bytes of the archive entry."""
+    if path.stat().st_size != entry.file_size:
+        return False
+    crc = 0
+    with path.open('rb') as handle:
+        while True:
+            block = handle.read(CHUNK)
+            if not block:
+                break
+            crc = zlib.crc32(block, crc)
+    return crc == entry.CRC
+
+
+def split_tag(member):
+    """Short name of a split for tagging its copies: 'main' for main.225.com.x.obb."""
+    stem = member.name[:-len(member.suffix)] if member.suffix else member.name
+    if member.suffix.lower() == '.obb':
+        stem = stem.split('.')[0]
+    return re.sub(r'[^\w.-]', '_', stem)[:40] or 'split'
+
+
+def tagged_target(target, tag, entry):
+    """Free path next to target carrying the split tag, or None if an identical copy is already there."""
+    for index in range(1, 100):
+        candidate = target.with_name(f'{target.stem}.{tag}{"" if index == 1 else f"-{index}"}{target.suffix}')
+        if not candidate.exists():
+            return candidate
+        if same_content(candidate, entry):
+            return None
+    raise RuntimeError(f'Too many differing copies of {entry.filename}')
+
+
+def extract(archive, root, budget, report, overwrite=False, tag=None):
     for entry in archive.infolist():
         if entry.is_dir():
             continue
@@ -57,8 +95,16 @@ def extract(archive, root, budget, report, overwrite=False):
             report['skipped'].append({'entry': entry.filename, 'reason': 'unsafe path'})
             continue
         if target.exists() and not overwrite:
-            report['collisions'] += 1
-            continue
+            in_assets = PurePosixPath(entry.filename.replace('\\', '/')).parts[0] == 'assets'
+            if tag is None or not in_assets or same_content(target, entry):
+                report['collisions'] += 1
+                continue
+            target = tagged_target(target, tag, entry)
+            if target is None:
+                report['collisions'] += 1
+                continue
+            report['renamed'].append({'entry': entry.filename, 'split': tag,
+                                      'kept_as': target.relative_to(root).as_posix()})
         target.parent.mkdir(parents=True, exist_ok=True)
         with archive.open(entry) as source, target.open('wb') as sink:
             while True:
@@ -92,7 +138,7 @@ def unpack(package, output, max_bytes=16 * 1024**3, seconds=900):
     merged.mkdir(parents=True, exist_ok=True)
     budget = Budget(max_bytes, seconds)
     report = {'input': str(package), 'container': None, 'splits': [], 'files': 0,
-              'collisions': 0, 'skipped': [], 'warnings': []}
+              'collisions': 0, 'renamed': [], 'skipped': [], 'warnings': []}
     if not zipfile.is_zipfile(package):
         raise ValueError('Not a ZIP-based package')
     with zipfile.ZipFile(package) as outer:
@@ -115,8 +161,13 @@ def unpack(package, output, max_bytes=16 * 1024**3, seconds=900):
                 report['warnings'].append('Not a ZIP, left in splits/: ' + member.name)
                 continue
             with zipfile.ZipFile(member) as inner:
-                extract(inner, merged, budget, report)
+                extract(inner, merged, budget, report, tag=split_tag(member))
             report['splits'].append(member.name)
+    if report['renamed']:
+        report['warnings'].append(
+            f"{len(report['renamed'])} files under assets/ differ between splits; the later copies were kept "
+            f"with the split name in the file name, e.g. {report['renamed'][0]['kept_as']}. Load them all: "
+            'Unity split builds keep different content in the APK and the OBB under the same name.')
     report['bytes_written'] = budget.written
     if not (merged / 'assets').exists():
         report['warnings'].append('No assets/ folder after unpacking: the bundle may be incomplete.')
